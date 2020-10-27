@@ -184,11 +184,12 @@ int parent_code (int pipe_in_fds[2], int pipe_out_fds[2], int fd)
 void sigint_handler (int sig)
 {
     if (sig == SIGINT)
-        printf ("\nPoka... TbI eto, ne otchaivaysa... (tobi pi**a)\n");
+        printf ("\nPoka...\n");
     exit (0);
 }
 
-/* info about how musc can we read, no use
+#if 0
+// info about how musc can we read, no use
 int free_pipe_space (int pipefd)
 {
     int bytes_availible = 0;
@@ -199,7 +200,8 @@ int free_pipe_space (int pipefd)
     printf ("pipe_free_space: %d\n", bytes_availible);
     return bytes_availible;
 }
-*/
+#endif
+
 int pipe_size (int pipefd) 
 {
     int pipe_sz = fcntl (pipefd, F_GETPIPE_SZ);
