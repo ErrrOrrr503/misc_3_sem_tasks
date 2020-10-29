@@ -5,32 +5,45 @@
 #include <unistd.h>
 #include <linux/limits.h>
 #include <fcntl.h>
-#include <signal.h>
 #include <poll.h>
 #include <time.h>
 #include <sys/ioctl.h>
+#include <memory.h>
 
 extern int errno;
 
+struct buffer {
+    char *buf;
+    size_t buf_sz;
+    size_t data_start; //first position with data
+    size_t data_end;  //first position without data after data
+};
+
 time_t g_start_time = 0;
 
-void sigint_handler (int sig);
-int alloc_bufer (char **buf, size_t buf_sz);
 int pipe_size (int pipefd);
 int parent_code (int pipe_in_fds[2], int pipe_out_fds[2], int fd);
+
+int how_much_read_avail (int fd);
+int alloc_buffer (char **buf, size_t buf_sz);
+
+int struct_buffer_init (struct buffer *buf, size_t buf_sz);
+int buffer_realloc_defrag (struct buffer *buf, size_t new_sz);
+ssize_t buf_write (int fd, struct buffer *buf);
+ssize_t buf_read (int fd, struct buffer *buf);
+int buf_defrag (struct buffer *buf);
 
 /*
 Gets info from stdin and gzips it to output_file
 */
 
 /* Questions:
-    1) Is there a way to get free/occupied space of pipe input end
+    1) Why FIONREAD accepts int as an arg
     2) Why poll() always returns POLLIN event even when eof is met?
 */
 int main (int argc, char *argv[])
 {
     g_start_time = time (NULL);
-    signal (SIGINT, sigint_handler);
     if (argc != 2) {
 		printf ("usage: '%s' output_file\n", argv[0]);
 		return 1;
@@ -85,8 +98,8 @@ int parent_code (int pipe_in_fds[2], int pipe_out_fds[2], int fd)
             close (pipe_in_fds[1]);\
             close (pipe_out_fds[0]);\
             close (fd);\
-            free (buf_in);\
             free (buf_out);\
+            free (s_buf_in.buf);\
             return X
 
     close (pipe_in_fds[0]); // close "выпись"
@@ -106,17 +119,18 @@ int parent_code (int pipe_in_fds[2], int pipe_out_fds[2], int fd)
     //init buffers, sizes, flags and so on
     char eof_flag = 0;
     size_t totally_read = 0, totally_written = 0;
-    int bytes_read = 0, bytes_written = 0, bytes_diff = 0;
-        //determine min size of 2 pipes and allocate 2 buffers of that size
+    int bytes_read = 0, bytes_written = 0;
+        //determine min size of 2 pipes and allocate 2 buffers of that size (will definately work and pipes of different sizes... no reason for that)
     int buf_sz = pipe_size (pipe_in_fds[1]);
     int tmp = pipe_size (pipe_out_fds[0]);
     if (tmp < buf_sz)
         buf_sz = tmp;
-    char *buf_in = NULL, *buf_out = NULL;
-    if (alloc_bufer (&buf_in, buf_sz) == -1 || alloc_bufer (&buf_out, buf_sz) == -1) {
+    char *buf_out = NULL;
+    struct buffer s_buf_in = {0};
+    if (alloc_buffer (&buf_out, buf_sz) == -1 || struct_buffer_init (&s_buf_in, buf_sz) == -1) {
         CLOSE_RETURN(-1);
     }
-    //we sleep until we have nothing to do, on receiving work, redirect data to gzip (or dump gzip output to file) and print statistics, timeount is infinite.
+    //we sleep while we have nothing to do, on receiving work, redirect data to gzip (or dump gzip output to file) and print statistics, timeount is infinite.
     while (!eof_flag) {
         if (poll (stdin_pipe_out_out, 2, -1) == -1) {
             perror ("poll () crashed");
@@ -151,17 +165,19 @@ int parent_code (int pipe_in_fds[2], int pipe_out_fds[2], int fd)
                 // read & redirect
                 bytes_read = 0;
                 bytes_written = 0;
-                bytes_diff = 0; // difference between read and written bytes
-                bytes_read = read (stdin_pipe_out_out[1].fd, buf_in, (size_t) buf_sz);
-                if (!bytes_read) { //if nothing to read left, we must send eof (drop pipe) 
+                bytes_read = buf_read (stdin_pipe_out_out[1].fd, &s_buf_in);
+                if (bytes_read == -1) {
+                    CLOSE_FREE_RETURN(-1);
+                }                    
+                if (!bytes_read) { //if "nothing to read left" (i.e. when we read all the file poll will trigger on eof), we must send eof (drop pipe) 
                     close (pipe_in_fds[1]);
                     stdin_pipe_out_out[1].events = 0; // don`t bother about stdin anymore. It works as after that gzip will process left data and hang up pipe_out
                     break;
                 }
-                bytes_written = write (pipe_in_fds[1], buf_in, (size_t) bytes_read);
-                bytes_diff = bytes_read - bytes_written;
-                if (bytes_diff)
-                    lseek (stdin_pipe_out_out[1].fd, -bytes_diff, SEEK_CUR); // return on position from whitch we have`t sent data
+                bytes_written = buf_write (pipe_in_fds[1], &s_buf_in);
+                if (bytes_written == -1) {
+                    CLOSE_FREE_RETURN(-1);
+                }
                 totally_read += bytes_read;
                 break;
             case POLLHUP: //impossible for stdin (or pipe выпись)
@@ -178,29 +194,22 @@ int parent_code (int pipe_in_fds[2], int pipe_out_fds[2], int fd)
         printf ("[%ld] totally read: %lu, totally written: %lu, compression ratio: %g\n",\
                         time (NULL) - g_start_time, totally_read, totally_written, ((float) totally_written) / ((float) totally_read));
     }
+    free (buf_out);
+    free (s_buf_in.buf);
+    close (fd);
     return 0;
 }
 
-void sigint_handler (int sig)
-{
-    if (sig == SIGINT)
-        printf ("\nPoka...\n");
-    exit (0);
-}
-
-#if 0
-// info about how musc can we read, no use
-int free_pipe_space (int pipefd)
+int how_much_read_avail (int fd)
 {
     int bytes_availible = 0;
-    if (ioctl (pipefd, TIOCINQ, &bytes_availible) == -1) {
+    if (ioctl (fd, TIOCINQ, &bytes_availible) == -1) {
         perror ("can't determine amount of free pipe bytes (via ioctl FIONREAD)");
         return -1;
     }
-    printf ("pipe_free_space: %d\n", bytes_availible);
+    printf ("fd_read_avail: %d\n", bytes_availible);
     return bytes_availible;
 }
-#endif
 
 int pipe_size (int pipefd) 
 {
@@ -212,7 +221,7 @@ int pipe_size (int pipefd)
     return pipe_sz;
 }
 
-int alloc_bufer (char **buf, size_t buf_sz)
+int alloc_buffer (char **buf, size_t buf_sz)
 {
     if (buf_sz <= 0)
         return -1;
@@ -221,5 +230,74 @@ int alloc_bufer (char **buf, size_t buf_sz)
         perror ("calloc failed");
         return -1;
     }
+    return 0;
+}
+
+int buf_defrag (struct buffer *buf)
+{
+    //plain
+    size_t data_len = buf->data_end - buf->data_start;
+    for (size_t i = 0; (i < data_len) && (buf->data_start > 0); i++) {
+        buf->buf[i] = buf->buf[i + buf->data_start];
+    }
+    buf->data_start = 0;
+    buf->data_end = data_len;
+    return 0;
+}
+
+ssize_t buf_read (int fd, struct buffer *buf)
+{
+    int read_avail = how_much_read_avail (fd);
+    if (read_avail < 0)
+        return -1;
+    if (read_avail == 0)
+        return 0;
+    if ((buf->buf_sz - (buf->data_end - buf->data_start)) < (size_t) read_avail) { //if free space is less than needed
+        if (buffer_realloc_defrag (buf, buf->buf_sz))
+            return -1;
+    }
+    if (buf->buf_sz - buf->data_end < (size_t) read_avail) {
+        buf_defrag (buf);
+    }
+    ssize_t bytes_read = read (fd, &buf->buf[buf->data_end], read_avail);
+    if (bytes_read != read_avail)
+        return -1;
+    buf->data_end += bytes_read;
+    return bytes_read;
+}
+
+ssize_t buf_write (int fd, struct buffer *buf)
+{
+    ssize_t bytes_written = write (fd, &buf->buf[buf->data_start], buf->data_end - buf->data_start);
+    if (bytes_written == -1) {
+        perror ("can't write to fd");
+        return -1;
+    }
+    buf->data_start += bytes_written;
+    return bytes_written;
+}
+
+int buffer_realloc_defrag (struct buffer *buf, size_t new_sz)
+{
+    char *newbuf = NULL;
+    if (alloc_buffer (&newbuf, new_sz) == -1)
+        return -1;
+    size_t data_len = buf->data_end - buf->data_start;
+    memcpy (newbuf, &buf->buf[buf->data_start], data_len);
+    free (buf->buf);
+    buf->buf = newbuf;
+    buf->data_start = 0;
+    buf->data_end = data_len;
+    buf->buf_sz = new_sz;
+    return 0;
+}
+
+int struct_buffer_init (struct buffer *buf, size_t buf_sz)
+{
+    if (alloc_buffer (&buf->buf, buf_sz))
+        return -1;
+    buf->buf_sz = buf_sz;
+    buf->data_start = 0;
+    buf->data_end = 0;
     return 0;
 }
