@@ -43,7 +43,7 @@ int main (int argc, char *argv[])
 int read_counter (int fd, long unsigned *num)
 {
 	struct flock fl = {0};
-	fl.l_type = F_WRLCK;    //Type of blocking lock found.
+	fl.l_type = F_WRLCK;    //Type of blocking lock (we are blocking writing)
 	fl.l_whence = SEEK_SET;
 	fl.l_start = 0; //Start of the blocking lock.
 	fl.l_len = 0;   // lock the whole file (even if it will be truncated)
@@ -76,7 +76,7 @@ int write_counter (int fd, long unsigned num)
 	write (fd, str, strlen (str));
 	//unlock
 	struct flock fl = {0};
-	fl.l_type = F_UNLCK;    //Type of blocking lock found.
+	fl.l_type = F_UNLCK;    //Type of blocking lock
 	fl.l_whence = SEEK_SET;
 	fl.l_start = 0; //Start of the blocking lock.
 	fl.l_len = 0;   // unlock the whole file (even if it will be truncated)
@@ -86,6 +86,6 @@ int write_counter (int fd, long unsigned num)
 		perror ("can't unlock file");
 		return -1;
 	}
-	//now successfully locked
+	//now successfully unlocked
 	return 0;
 }

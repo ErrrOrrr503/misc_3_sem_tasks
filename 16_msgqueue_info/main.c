@@ -33,6 +33,7 @@ int main (int argc, char *argv[])
     }
     if (mq == -1){
         perror ("can't open or create msg_queue");
+        free (mq_name);
         return -1;
     }
     //get and print info
@@ -48,10 +49,10 @@ int main (int argc, char *argv[])
     printf ("mq_curmsgs: amount of messages currently in queue is: %ld\n", mq_attributes.mq_curmsgs);
 
     mq_close (mq);
-    free (mq_name);
     if (!mq_was_opened_flag) {
         mq_unlink (mq_name); //errors are impossible here
     }
+    free (mq_name);
     return 0;
 }
 
@@ -75,7 +76,7 @@ char * check_mq_name_alloc (const char *raw_name)
         return NULL;
     }
     //form correct name
-    char *mq_name = (char *) calloc (raw_name_len + 1, sizeof (char));
+    char *mq_name = (char *) calloc (raw_name_len + 2, sizeof (char)); // 1 for '\0', one for '/'
     if (mq_name == NULL) {
         printf ("can't allocate memory for mq_name\n");
         return NULL;

@@ -5,10 +5,11 @@
 #include <unistd.h>
 #include <signal.h>
 #include <linux/limits.h>
+#include <stdbool.h>
 
 extern int errno;
 
-volatile char g_termination_flag = 0;
+volatile bool g_termination_flag = 0;
 
 void sig_handler (int sig);
 int print_event_info (const char * wdir, const struct inotify_event *event);
@@ -38,7 +39,10 @@ int main (int argc, char *argv[])
         perror ("can't init inotify instance");
         return -1;
     }
-    int dir_inot = inotify_add_watch (inot, argv[1], IN_CREATE | IN_DELETE | IN_MODIFY | IN_ATTRIB | IN_ACCESS | IN_OPEN | IN_DELETE_SELF | IN_MOVE_SELF | IN_MOVED_FROM | IN_MOVED_TO);
+    int dir_inot = inotify_add_watch (inot, argv[1], IN_CREATE | IN_DELETE | IN_MODIFY | IN_ATTRIB \
+                                                   | IN_ACCESS | IN_OPEN | IN_DELETE_SELF | IN_MOVE_SELF \
+                                                   | IN_MOVED_FROM | IN_MOVED_TO | IN_UNMOUNT \
+                                                   );
     if (dir_inot == -1) {
         perror ("can't add dir to watch list");
         return -1;

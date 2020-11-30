@@ -4,6 +4,7 @@
 #include <semaphore.h>
 #include <stdatomic.h>
 #include <pthread.h>
+#include <time.h>
 
 typedef struct {
     sem_t s;
@@ -13,6 +14,8 @@ typedef struct {
 void *thread (void *arg_) {
     thread_arg *arg = (thread_arg *) arg_;
     while (arg->progress < 100) {
+        struct timespec st = {0, 200000};
+        nanosleep (&st, NULL);
         atomic_fetch_add (&arg->progress, 1);
         sem_post (&arg->s);
     }
@@ -33,11 +36,13 @@ int main ()
     }
 
     unsigned temp = 0;
-    do {
+    temp = atomic_load (&arg.progress); //correct display of 0
+    printf ("Progress is %u%\%\n", temp);
+    while (temp < 100) {
+        sem_wait (&arg.s);
         temp = atomic_load (&arg.progress);
         printf ("Progress is %u%\%\n", temp);
-        sem_wait (&arg.s);
-    } while (temp < 100);
+    }
     if (errno = pthread_join (thread_id, NULL)) {
         perror ("error while thread terminating");
         return -1;

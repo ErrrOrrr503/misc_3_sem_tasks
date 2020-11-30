@@ -5,7 +5,6 @@ int how_much_read_avail (int fd)
         perror ("can't determine amount of free pipe bytes (via ioctl FIONREAD)");
         return -1;
     }
-    printf ("fd_read_avail: %d\n", bytes_availible);
     return bytes_availible;
 }
 

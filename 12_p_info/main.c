@@ -231,6 +231,7 @@ int print_proc_status (pid_t pid)
 	while ((read_bytes = read (fd, buffer, bs)) != 0) {
 		if (read_bytes == (ssize_t) -1) {
 			perror ("can't read /proc/<pid>/status");
+			free (buffer);
 			return -1;
 		}
 		write (STDOUT_FILENO, buffer, read_bytes);

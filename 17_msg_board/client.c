@@ -34,6 +34,7 @@ int main (int argc, char *argv[])
     // send msg
     int ret = check_mq_send (mq, argv[2], 0, 0); //0 sor sz: automatic; 0 for prio: lowest
     free (mq_name);
+    mq_close (mq);
     return ret;
 }
 
@@ -57,7 +58,7 @@ char * check_mq_name_alloc (const char *raw_name)
         return NULL;
     }
     //form correct name
-    char *mq_name = (char *) calloc (raw_name_len + 1, sizeof (char));
+    char *mq_name = (char *) calloc (raw_name_len + 2, sizeof (char)); // 1 for '\0', one for '/'
     if (mq_name == NULL) {
         printf ("can't allocate memory for mq_name\n");
         return NULL;

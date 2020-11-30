@@ -6,8 +6,6 @@
 #include <pthread.h>
 #include <time.h>
 
-// NOTE: as progress is a pointer, (volatile) is, it seems, nesessary
-
 extern int errno;
 
 typedef struct {

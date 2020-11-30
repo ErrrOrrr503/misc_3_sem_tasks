@@ -1,11 +1,11 @@
 int how_much_read_avail (int fd)
 {
+    // int is not that much according the standart, however 2^63 (on x64 int is 64 bit) is more than 8000000 TB, untestable here, need to test on x86
     int bytes_availible = 0;
     if (ioctl (fd, TIOCINQ, &bytes_availible) == -1) {
         perror ("can't determine amount of free pipe bytes (via ioctl FIONREAD)");
         return -1;
     }
-    printf ("fd_read_avail: %d\n", bytes_availible);
     return bytes_availible;
 }
 

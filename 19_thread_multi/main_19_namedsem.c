@@ -8,8 +8,6 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 
-// NOTE: as progress is a pointer, (volatile) is, it seems, nesessary
-
 extern int errno;
 
 typedef struct {

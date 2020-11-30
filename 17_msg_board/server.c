@@ -11,7 +11,7 @@
 
 extern int errno;
 
-volatile char flag_termination = 0;
+volatile char g_flag_termination = 0;
 
 char * check_mq_name_alloc (const char *raw_name);
 ssize_t mq_receive_alloc (mqd_t mq, char **buf, unsigned *prio_received);
@@ -51,12 +51,12 @@ int main (int argc, char *argv[])
     while (1) {
         unsigned prio = 0;
         char *buf = NULL;
-        ssize_t msg_sz = mq_receive_alloc (mq, &buf, &prio);// why alloc? commonly, nobody guarants that queue size is const, here it is const
-        if (msg_sz == -1 && !flag_termination) {
+        ssize_t msg_sz = mq_receive_alloc (mq, &buf, &prio);
+        if (msg_sz == -1 && !g_flag_termination) {
             perror ("can't receive msg");
-            flag_termination = 1;
+            g_flag_termination = 1;
         }
-        if (flag_termination) {
+        if (g_flag_termination) {
             mq_close (mq);
             mq_unlink (mq_name);
             if (buf != NULL)
@@ -91,7 +91,7 @@ char * check_mq_name_alloc (const char *raw_name)
         return NULL;
     }
     //form correct name
-    char *mq_name = (char *) calloc (raw_name_len + 2, sizeof (char)); // +1 for maybe '/' +1 for '\0'
+    char *mq_name = (char *) calloc (raw_name_len + 2, sizeof (char)); // 1 for '\0', one for '/'
     if (mq_name == NULL) {
         printf ("can't allocate memory for mq_name\n");
         return NULL;
@@ -123,6 +123,6 @@ ssize_t mq_receive_alloc (mqd_t mq, char **buf, unsigned *prio_received)
 
 void sig_handler (int sig)
 {
-    flag_termination = 1;
+    g_flag_termination = 1;
     printf ("\nterminated by signal: %d : %s\n", sig, strsignal (sig));
 }

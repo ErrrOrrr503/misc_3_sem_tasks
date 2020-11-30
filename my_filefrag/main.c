@@ -17,10 +17,9 @@
 #include <sys/vfs.h>
 #include <sys/ioctl.h>
 #include <linux/fiemap.h>
+#include <stdbool.h>
 
 extern int errno;
-extern char *optarg;
-extern int optind, opterr, optopt;
 
 typedef int fdesc;
 
@@ -54,8 +53,8 @@ int main (int argc, char *argv[])
 	if (!ioctl (fd, FIGETBSZ, &blksize))
 			printf ("ioctl blksize is: %lu\n", (unsigned long) blksize);
 	//will use fiemap for extracting extents info
-	char buf[2048] = {0};
-	struct fiemap *fiemap = (struct fiemap *) buf; // why that unobvious? becaue fm_extemts are not fiemap_extent * but fiemap_extent [0]! WHY? Bacause!
+	uint8_t buf[2048] = {0};
+	struct fiemap *fiemap = (struct fiemap *) buf; // becaue fm_extents are not fiemap_extent * but fiemap_extent []
 	fiemap->fm_extent_count = (sizeof (buf) - sizeof (*fiemap)) / sizeof (struct fiemap_extent);
 	fiemap->fm_length = ~ (uint64_t) 0;
 	fiemap->fm_start = 0;

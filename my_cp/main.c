@@ -361,7 +361,7 @@ int meta_copy_at (struct fileinfo *dir_f, struct fileinfo *source_f, struct file
 		xattr_buf_len  = llistxattr (source_full_name, xattr_buf, xattr_buf_len);
 		if (xattr_buf_len == -1) {
 			perror (source_full_name);
-				free (xattr_buf);
+			free (xattr_buf);
 			return -1;
 		}
 		char *position = xattr_buf;
@@ -389,6 +389,7 @@ int meta_copy_at (struct fileinfo *dir_f, struct fileinfo *source_f, struct file
 					free (xattr_buf);
 					return -1;
 				}
+				free (value_buf);
 			}
 			if (value_len == 0) {
 				if (lsetxattr (dest_full_name, position, NULL, 0, 0)) { //create or replace xattr
@@ -399,6 +400,7 @@ int meta_copy_at (struct fileinfo *dir_f, struct fileinfo *source_f, struct file
 			}
 			pos_len = strlen (position) + 1;
 		}
+		free (xattr_buf);
 	}
 	return 0;
 }
@@ -461,7 +463,7 @@ int subdir (char *str_1, char *str_2)
 
 int dir_to_dir_copy (struct fileinfo *source_f, struct fileinfo *dest_f)
 {
-	// dest is DIR! where we will copy entire source dir: source ->cp-> dest/source/...
+	// dest is DIR! here we will copy entire source dir: source ->cp-> dest/source/...
 	int ret = 0;
 	int dir_opened_flag = 0;
 	if (source_f == NULL || dest_f == NULL)
@@ -786,11 +788,13 @@ int fcopy_calloc (struct fileinfo *source_f, struct fileinfo *dest_f, off_t bs)
 	while ((read_bytes = read (source_f->fd, buffer, bs)) != 0) {
 		if (read_bytes == (ssize_t) -1) {
 			perror (source_f->name);
+			free (buffer);
 			return -1;
 		}
 
 		if (write (dest_f->fd, buffer, read_bytes) == -1) {
 			perror (dest_f->name);
+			free (buffer);
 			return -1;
 		}
 	}

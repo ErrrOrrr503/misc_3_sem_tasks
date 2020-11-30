@@ -7,8 +7,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <time.h>
-//#include <sys/ioctl.h>
-//#include <memory.h>
+#include <stdbool.h>
 #include "buffer.h"
 
 extern int errno;
@@ -108,14 +107,10 @@ int parent_code (int pipe_in_fds[2], int pipe_out_fds[2], int fd)
     pipe_write_pfd->fd = pipe_in_fds[1];
     pipe_write_pfd->events = 0;
     //init buffers, sizes, flags and so on
-    char eof_flag = 0;
+    bool eof_flag = 0;
     size_t totally_read = 0, totally_written = 0, totally_proceeded = 0, totally_saved = 0;
     int bytes_read = 0, bytes_written = 0;
-        //determine min size of 2 pipes and allocate 2 buffers of that size (will definately work and pipes of different sizes... no reason for that)
     int buf_sz = pipe_size (pipe_in_fds[1]);
-    int tmp = pipe_size (pipe_out_fds[0]);
-    if (tmp < buf_sz)
-        buf_sz = tmp;
     char *buf_out = NULL;
     struct buffer s_buf_in = {0};
     if (alloc_buffer (&buf_out, buf_sz) == -1 || struct_buffer_init (&s_buf_in, buf_sz) == -1) {
@@ -132,7 +127,7 @@ int parent_code (int pipe_in_fds[2], int pipe_out_fds[2], int fd)
             case POLLHUP: // hang up (gzip crashed or ended)
             case POLLRDNORM: // same as pollout
             case POLLIN:
-            case POLLIN | POLLHUP: // crutch... todo: switch to if from switch, less understandable, but will work more properly
+            case POLLIN | POLLHUP: // crutch... solutuon is switching to if from switch, but it is less understandable
                 //read & dump to file
                 bytes_read = 0;
                 bytes_written = 0;
@@ -164,21 +159,21 @@ int parent_code (int pipe_in_fds[2], int pipe_out_fds[2], int fd)
                     CLOSE_FREE_RETURN(-1);
                 }                    
                 if (!bytes_read) {
-                    stdin_pfd->events = 0; //if no data of buffer space left, don't bother about stdin
+                    stdin_pfd->events = 0; //if no data or buffer space left, don't bother about stdin
                     if (s_buf_in.data_end - s_buf_in.data_start == 0) { //moreover if bufer is empty, hang up pipe
                         close (pipe_write_pfd->fd);
-                        pollfds_num--;
+                        pollfds_num--; //and exclude closed fd from poll list
                     }
                     break;
                 }
-                if (s_buf_in.data_end - s_buf_in.data_start > 0)
+                if (s_buf_in.data_end - s_buf_in.data_start > 0) // if we have somedata, track pipe_write: when we will be able to write into it
                     pipe_write_pfd->events = POLLOUT;
                 totally_read += bytes_read;
                 break;
             case POLLHUP: //impossible for stdin (or pipe выпись)
             case POLLNVAL: 
             case POLLERR:
-                printf ("something went wrong with STDIN\n"); // errors are not possible in this particular case, however...
+                printf ("something went wrong with STDIN\n");
                 CLOSE_FREE_RETURN(-1);
             default:
                 break;
@@ -188,7 +183,7 @@ int parent_code (int pipe_in_fds[2], int pipe_out_fds[2], int fd)
             case POLLWRNORM:
             case POLLOUT:
                 bytes_written = buf_write (pipe_write_pfd->fd, &s_buf_in);
-                if (bytes_written == -1) {
+                if (bytes_written == -1) { //error
                     CLOSE_FREE_RETURN(-1);
                 }
                 totally_written += bytes_written;
@@ -207,7 +202,7 @@ int parent_code (int pipe_in_fds[2], int pipe_out_fds[2], int fd)
             case POLLHUP: //impossible
             case POLLNVAL: 
             case POLLERR:
-                printf ("something went wrong with pipe write\n"); // errors are not possible in this particular case, however...
+                printf ("something went wrong with pipe write\n");
                 CLOSE_FREE_RETURN(-1);
             default:
                 break;

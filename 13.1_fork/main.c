@@ -10,10 +10,7 @@
 #include <pwd.h>
 #include <linux/limits.h>
 #include <sys/wait.h>
-/*
-Questions: is it really enough? shall we implement for example waitpid with
-WUNTRACED and WCONTINUED and "trace" child state until it is terminated?
-*/
+
 
 int print_p_info_small (const char* description);
 
