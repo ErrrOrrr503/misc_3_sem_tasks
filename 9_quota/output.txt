@@ -1,0 +1,40 @@
+errrorrr@localhost ~/g/m/9_quota (master)> ./quotainfo /dev/sdc1
+USER quota:
+Absolute blocks limit       :                    0
+Preffered blocks limit      :                    0
+Currently occupied (bytes)  :                    0
+Abs inodes allocated        :                    0
+Pref inodes allocated       :                    0
+Cur inodes allocated        :                    0
+Time Limit for use          :                    0
+Time Limit for files        :                    0
+GROUP quota:
+Absolute blocks limit       :                    0
+Preffered blocks limit      :                    0
+Currently occupied (bytes)  :                    0
+Abs inodes allocated        :                    0
+Pref inodes allocated       :                    0
+Cur inodes allocated        :                    0
+Time Limit for use          :                    0
+Time Limit for files        :                    0
+
+errrorrr@localhost ~/g/m/9_quota (master)> sudo ./quotainfo /dev/sdc1
+USER quota:
+Absolute blocks limit       :                    0
+Preffered blocks limit      :                    0
+Currently occupied (bytes)  :            261791744
+Abs inodes allocated        :                    0
+Pref inodes allocated       :                    0
+Cur inodes allocated        :                    3
+Time Limit for use          :                    0
+Time Limit for files        :                    0
+GROUP quota:
+Absolute blocks limit       :                    0
+Preffered blocks limit      :                    0
+Currently occupied (bytes)  :            261791744
+Abs inodes allocated        :                    0
+Pref inodes allocated       :                    0
+Cur inodes allocated        :                    3
+Time Limit for use          :                    0
+Time Limit for files        :                    0
+
