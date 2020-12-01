@@ -8,10 +8,11 @@
 #include <unistd.h>
 #include <linux/limits.h>
 #include <signal.h>
+#include <stdbool.h>
 
 extern int errno;
 
-volatile char g_flag_termination = 0;
+volatile bool g_flag_termination = 0;
 
 char * check_mq_name_alloc (const char *raw_name);
 ssize_t mq_receive_alloc (mqd_t mq, char **buf, unsigned *prio_received);
