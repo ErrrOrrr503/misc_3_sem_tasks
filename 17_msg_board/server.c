@@ -33,7 +33,7 @@ int main (int argc, char *argv[])
     int ret = sigaction (SIGINT, &act, NULL);
     ret |= sigaction (SIGTERM, &act, NULL);
     if (ret) {
-        perror ("sigacrion error");
+        perror ("sigaction error");
         return -1;
     }
     //form mq_name, as it must be '/somename' 
