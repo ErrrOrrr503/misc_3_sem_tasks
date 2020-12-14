@@ -12,13 +12,23 @@
 #include <sys/wait.h>
 #include <stdbool.h>
 #include <inttypes.h>
+#include <fcntl.h>
+#include <omp.h>
+#include <math.h>
 
 //using getopt as it is in posix
+/* We can create 2 pipes, make gcc read from one and put into another, 
+but it is exactly 14th task, here it is easier as code will fit in 
+pipe, however that depends on size of gcc output thar can't be determined.
+So it`s much easier just to determine filename of temp file created with mkstamp.
+ */
 
 bool g_flag_verbose = 0;
+int g_threadnum = 1;
 
-const char dlname[] = "./tmp.so";
+char dlname[] = "./tmp_lib_XXXXXX.so";
 const char funcname[] = "equation";
+const char usage[] = "usage: %s -f \"[c-function](x)>\" -b <begin> -e <end> (-p <precision>) or (-s <step>) [-v] [-t <thread_amount>]\n";
 
 typedef long double (* equation) (long double, long double, uint64_t);
 
@@ -30,11 +40,22 @@ static int check_args (int argc, char * const argv[], const char ** pfunc, long 
 
 int main (int argc, char *argv[])
 {
+    //init
     long double begin = 0, end = 0;
     uint64_t iterations = 0;
     const char * func;
     if (check_args (argc, argv, &func, &begin, &end, &iterations))
         return -1;
+    //create tempfile
+    int fd = mkstemps (dlname, 3);
+    if (fd == -1) {
+        perror ("can't create temp shared lib file");
+        return -1;
+    }
+    close (fd);
+    if (g_flag_verbose)
+        printf ("temp shared lib name: '%s'\n", dlname);
+    //init pipe
     int pipe_fds[2] = {-1};
     if (pipe (pipe_fds) == -1) {
         perror ("can't init pipe");
@@ -64,9 +85,19 @@ int main (int argc, char *argv[])
     void *lib = NULL;
     if (extract_equation (&equ, &lib))
         return -1;
-    long double res = equ (begin, end, iterations);
+    //calculations section: omp
+    omp_set_dynamic(0); // forbid changind thread amount dynamicly
+    omp_set_num_threads (g_threadnum); // set thread amount
+    int i = 0;
+    long double res = 0;
+#pragma omp parallel for firstprivate (begin, end, iterations) reduction (+:res)
+    for (i = 0; i < g_threadnum; i++) {
+        res = equ (begin + i * (end - begin) / g_threadnum, begin + (i + 1) * (end - begin) / g_threadnum, iterations);
+    }
+    //show result and exit
     printf ("res: %Lg\n", res);
     dlclose (lib);
+    unlink (dlname);
     return 0;
 }
 
@@ -98,7 +129,7 @@ static int send_code (int pipe_fds[2], const char *func)
         "\
         #include <math.h> \n\
         #include <inttypes.h> \n\
-        long double %s (long double begin, long double end, uint64_t iterations) \n\
+        long double %s (const long double begin, const long double end, const uint64_t iterations) \n\
         { \n\
             long double res = 0; \n\
             long double x = begin; \n\
@@ -161,7 +192,7 @@ static int check_args (int argc, char * const argv[], const char ** pfunc, long 
     bool flag_stepping = 0;
     int ret = 0;
     uint8_t uninit_mask = 0b1111;
-    while ((ret = getopt (argc, argv, "vf:b:e:p:s:")) != -1) {
+    while ((ret = getopt (argc, argv, "vf:b:e:p:s:t:")) != -1) {
         switch (ret) {
             case 'f':
                 *pfunc = optarg;
@@ -193,13 +224,21 @@ static int check_args (int argc, char * const argv[], const char ** pfunc, long 
             case 'v':
                 g_flag_verbose = 1;
                 break;
+            case 't':
+                if (sscanf (optarg, "%d", &g_threadnum) != 1) {
+                    printf ("incorrect input: threadnum must be an integer >= 0 (0 for auto)\n");
+                    return -1;
+                }
+                if (!g_threadnum)
+                    g_threadnum = omp_get_num_procs ();
+                break;
             default:
-                printf ("usage: %s -f \"[c-function](x)>\" -b <begin> -e <end> [-p <precision>] or [-s <step>]\n", argv[0]);
+                printf (usage, argv[0]);
                 return -1;
         }
     }
     if (uninit_mask) {
-        printf ("usage: %s -f \"[c-function](x)>\" -b <begin> -e <end> [-p <precision>] or [-s <step>]\n", argv[0]);
+        printf (usage, argv[0]);
         return -1;
     }
     if (*end < *begin) {
@@ -208,12 +247,13 @@ static int check_args (int argc, char * const argv[], const char ** pfunc, long 
     }
     if (flag_stepping)
         prec = (*end - *begin) / prec; // now prec is somewhat num of iterations
+    prec = ceill (prec / g_threadnum);
     if (prec < 1 || prec > UINT64_MAX - 1) {
-        printf ("incorrect precision: %Lg\n", prec);
+        printf ("incorrect precision: %Lg per thread\n", prec);
         return -1;
     }
     *iterations = (uint64_t) prec;
     if (g_flag_verbose)
-        printf ("func: %s\nbegin: %Lg, end: %Lg\niterations: %" PRIu64 "\n", *pfunc, *begin, *end, *iterations);
+        printf ("func: %s\nbegin: %Lg, end: %Lg\niterations per thread: %" PRIu64 " total: %" PRIu64 "\nthread amount: %d\n", *pfunc, *begin, *end, *iterations, *iterations * g_threadnum, g_threadnum);
     return 0;
 }
