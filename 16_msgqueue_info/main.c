@@ -1,16 +1,7 @@
-#include <fcntl.h>
-#include <sys/stat.h>
 #include <mqueue.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <errno.h>
-#include <unistd.h>
-#include <linux/limits.h>
-
-extern int errno;
-
-char * check_mq_name_alloc (const char *raw_name);
 
 int main (int argc, char *argv[])
 {
@@ -20,25 +11,24 @@ int main (int argc, char *argv[])
     }
     char mq_was_opened_flag = 0;
     //form mq_name, as it must be '/somename' 
-    char *mq_name = check_mq_name_alloc (argv[1]);
+    const char *mq_name = argv[1];
     if (mq_name == NULL)
         return -1;
     printf ("formed mq_name is: '%s'\n", mq_name);
     //open or create queue
-    mqd_t mq = mq_open (mq_name, O_RDWR | O_CREAT | O_EXCL, 0666, NULL); // 0666 :rdwr for user/group/others. NULL: default params
+    mqd_t mq = mq_open (mq_name, O_RDONLY | O_CREAT | O_EXCL, 0600, NULL); // 0666 :rdwr for user/group/others. NULL: default params
     if (mq == -1 && errno == EEXIST) {
         printf ("msg_gueue '%s' already existed\n", mq_name);
-        mq = mq_open (mq_name, O_RDWR);
+        mq = mq_open (mq_name, O_RDONLY);
         mq_was_opened_flag = 1;
     }
     if (mq == -1){
         perror ("can't open or create msg_queue");
-        free (mq_name);
         return -1;
     }
     //get and print info
     struct mq_attr mq_attributes = {0};
-    mq_getattr (mq, &mq_attributes); // error is imposible here
+    mq_getattr (mq, &mq_attributes); // errors are imposible here
 
     if (mq_attributes.mq_flags)
         printf ("mq_flags is: O_NONBLOCK\n");
@@ -52,39 +42,5 @@ int main (int argc, char *argv[])
     if (!mq_was_opened_flag) {
         mq_unlink (mq_name); //errors are impossible here
     }
-    free (mq_name);
     return 0;
-}
-
-char * check_mq_name_alloc (const char *raw_name)
-{
-    //function checks queue name and forms correct one with (maybe) adding first '/'
-    if (raw_name[0] == 0)
-        return NULL;
-    //check '/'
-    size_t i = 1;
-    for (; raw_name[i] != 0; i++) {
-        if (raw_name[i] == '/') {
-            printf ("wrong queue name, read man 7 mq_overview\n");
-            return NULL;
-        }
-    }
-    size_t raw_name_len = i;
-    //check length
-    if (raw_name_len > NAME_MAX) {
-        printf ("queue name too long, read man 7 mq_overview\n");
-        return NULL;
-    }
-    //form correct name
-    char *mq_name = (char *) calloc (raw_name_len + 2, sizeof (char)); // 1 for '\0', one for '/'
-    if (mq_name == NULL) {
-        printf ("can't allocate memory for mq_name\n");
-        return NULL;
-    }
-    mq_name[0] = '/';
-    if (raw_name[0] != '/')
-        strcpy (&mq_name[1], raw_name);
-    else 
-        strcpy (mq_name, raw_name);
-    return mq_name;
 }

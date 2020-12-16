@@ -1,12 +1,14 @@
+#include "buffer.h"
+
 int how_much_read_avail (int fd)
 {
-    // int is not that much according the standart, however 2^63 (on x64 int is 64 bit) is more than 8000000 TB, untestable here, need to test on x86
-    int bytes_availible = 0;
-    if (ioctl (fd, TIOCINQ, &bytes_availible) == -1) {
+    // int is not that much according the standart, however 2^63 (on x64 int is 64 bit) is quite many bytes
+    int bytes_available = 0;
+    if (ioctl (fd, TIOCINQ, &bytes_available) == -1) {
         perror ("can't determine amount of free pipe bytes (via ioctl FIONREAD)");
         return -1;
     }
-    return bytes_availible;
+    return bytes_available;
 }
 
 int alloc_buffer (char **buf, size_t buf_sz)
@@ -40,6 +42,7 @@ ssize_t buf_read (int fd, struct buffer *buf)
         return -1;
     if (read_avail == 0)
         return 0;
+    
     if ((buf->buf_sz - buf->data_end < (size_t) read_avail) && (buf->data_start > 0)) {
         buf_defrag (buf);
     }
@@ -74,4 +77,9 @@ int struct_buffer_init (struct buffer *buf, size_t buf_sz)
     buf->data_start = 0;
     buf->data_end = 0;
     return 0;
+}
+
+size_t data_amount (struct buffer * buf)
+{
+    return buf->data_end - buf->data_start;
 }

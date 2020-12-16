@@ -1,20 +1,13 @@
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <mqueue.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
-#include <linux/limits.h>
 #include <signal.h>
 #include <time.h>
 #include <stdbool.h>
 #include <sys/mman.h>
-#include <semaphore.h>
-#include "shmem.h"
-
-extern int errno;
+#include "common.h"
 
 volatile bool g_flag_termination = 0;
 
@@ -32,50 +25,29 @@ int main (int argc, char *argv[])
         // do not need to block other signals
         // do not need special flags
         // sa_restorer not even in posix
-    int ret = sigaction (SIGINT, &act, NULL);
-    ret |= sigaction (SIGTERM, &act, NULL);
-    if (ret) {
+    if (sigaction (SIGTERM, &act, NULL) || sigaction (SIGINT, &act, NULL)) {
         perror ("sigaction error");
         return -1;
     }
-    //form shmem_name, as it must be '/somename' 
-    char *shm_name = check_mq_shmem_name_alloc (argv[1]);
-    if (shm_name == NULL)
-        return -1;
+    const char *shm_name = argv[1];
     size_t shm_size = sizeof (struct time_shared);
-    printf ("formed mq_name is: '%s'; size of shmem: '%lu'\n", shm_name, shm_size);
+    printf ("size of shmem: '%lu'\n", shm_size);
     struct time_shared *time_shared = (struct time_shared *) shared_mem_init (shm_name, shm_size, \
-                                                                        O_RDWR, 0, PROT_READ | PROT_WRITE, MAP_SHARED, 0);
-    if (time_shared == MAP_FAILED) {
-        free (shm_name);
+                                                                        O_RDWR, 0200, PROT_READ);
+    if (time_shared == NULL) {
         printf ("Server not running?\n");
         return -1;
     }
-    //semaphore inited by server, if not - servet is not running => will fail to open shmem;
-    bool time_error_flag = 0;
-    char str[timestr_len_target];
-    while (1) {
-        sem_wait (&time_shared->sem);
-        if (!time_shared->len) {
-            g_flag_termination = 1;
-            time_error_flag = 1;
+    char str[TIMESTR_LEN_TARGET];
+    while (!g_flag_termination) {
+        unsigned ver = time_shared->ver;
+        strncpy (str, time_shared->time, TIMESTR_LEN_TARGET);
+        if (time_shared->ver == ver) { // if data read is correct then print, else repeat reading
+            printf ("%s\n", str);
+            sleep (1);
         }
-        else
-            strncpy (str, time_shared->time, timestr_len_target);
-        sem_post (&time_shared->sem);
-        if (g_flag_termination) {
-            int ret = 0;
-            if (time_error_flag) {
-                printf ("Something wrong with server, exiting\n");
-                ret = -1;
-            }
-            munmap (time_shared, shm_size);
-            free (shm_name);
-            return ret;
-        }
-        printf ("%s\n", str);
-        sleep (1);
     }
+    munmap (time_shared, shm_size);
     return 0;
 }
 

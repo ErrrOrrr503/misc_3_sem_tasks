@@ -1,20 +1,12 @@
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <mqueue.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
-#include <unistd.h>
-#include <linux/limits.h>
 #include <signal.h>
 #include <time.h>
 #include <stdbool.h>
 #include <sys/mman.h>
-#include <semaphore.h>
-#include "shmem.h"
-
-extern int errno;
+#include "common.h"
 
 volatile bool g_flag_termination = 0;
 
@@ -32,58 +24,40 @@ int main (int argc, char *argv[])
         // do not need to block other signals
         // do not need special flags
         // sa_restorer not even in posix
-    int ret = sigaction (SIGINT, &act, NULL);
-    ret |= sigaction (SIGTERM, &act, NULL);
-    if (ret) {
+    if (sigaction (SIGINT, &act, NULL) || sigaction (SIGTERM, &act, NULL)) {
         perror ("sigaction error");
         return -1;
     }
-    //form shmem_name, as it must be '/somename' 
-    char *shm_name = check_mq_shmem_name_alloc (argv[1]);
-    if (shm_name == NULL)
-        return -1;
+    const char *shm_name = argv[1];
     size_t shm_size = sizeof (struct time_shared);
-    printf ("formed mq_name is: '%s'; size of shmem: '%lu'\n", shm_name, shm_size);
+    printf ("size of shmem: '%lu'\n", shm_size);
     struct time_shared *time_shared = (struct time_shared *) shared_mem_init (shm_name, shm_size, \
-                                                                        O_RDWR | O_CREAT | O_EXCL, 0622, PROT_READ | PROT_WRITE, MAP_SHARED, 0);
-                                                                        // rw for user, ro for clients (others)
-    if (time_shared == MAP_FAILED) {
+                                                                        O_RDWR | O_CREAT | O_EXCL, 0622, PROT_READ | PROT_WRITE);
+                                                                        // rw for server (user), ro for clients (others)
+    if (time_shared == NULL) {
         if (errno == EEXIST)
             printf ("server already running?\n");
-        free (shm_name);
         return -1;
     }
-    // init semaphore;
-    sem_init (&time_shared->sem, 1, 0); // shared sem
-
     bool time_error_flag = 0;
-    bool first_iteration_flag = 1;
-    while (1) {
+    while (!g_flag_termination) {
         time_t tm = time (NULL);
-        if (first_iteration_flag) ;
-        else
-            sem_wait (&time_shared->sem);
-        first_iteration_flag = 0;
-        time_shared->len = strftime (time_shared->time, timestr_len_target, "%c", localtime (&tm));
-        if (!time_shared->len) {
-            g_flag_termination = 1;
+        time_shared->ver++;
+        if (!strftime (time_shared->time, TIMESTR_LEN_TARGET, "%c", localtime (&tm))) {
             time_error_flag = 1;
+            break;
         }
-        sem_post (&time_shared->sem);
+        time_shared->ver++;
         sleep (1);
-        if (g_flag_termination) {
-            int ret = 0;
-            if (time_error_flag) {
-                printf ("Something wrong with time, exiting\n");
-                ret = -1;
-            }
-            munmap (time_shared, shm_size);
-            shm_unlink (shm_name);
-            free (shm_name);
-            return ret;
-        }
     }
-    return 0;
+    int ret = 0;
+    if (time_error_flag) {
+        printf ("Something wrong with time, exiting\n");
+        ret = -1;
+    }
+    munmap (time_shared, shm_size);
+    shm_unlink (shm_name);
+    return ret;
 }
 
 void sig_handler (int sig)

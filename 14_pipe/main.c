@@ -8,9 +8,7 @@
 #include <poll.h>
 #include <time.h>
 #include <stdbool.h>
-#include "buffer.h"
-
-extern int errno;
+#include "buf_circ.h"
 
 time_t g_start_time = 0;
 
@@ -21,10 +19,6 @@ int parent_code (int pipe_in_fds[2], int pipe_out_fds[2], int fd);
 Gets info from stdin and gzips it to output_file
 */
 
-/* Questions:
-    1) Why FIONREAD accepts int as an arg
-    2) Why poll() always returns POLLIN event even when eof is met?
-*/
 int main (int argc, char *argv[])
 {
     g_start_time = time (NULL);
@@ -73,26 +67,13 @@ int main (int argc, char *argv[])
 
 int parent_code (int pipe_in_fds[2], int pipe_out_fds[2], int fd)
 {
-    #define CLOSE_RETURN(X) \
-            close (pipe_in_fds[1]);\
-            close (pipe_out_fds[0]);\
-            close (fd);\
-            return X
-    #define CLOSE_FREE_RETURN(X) \
-            close (pipe_in_fds[1]);\
-            close (pipe_out_fds[0]);\
-            close (fd);\
-            free (buf_out);\
-            free (s_buf_in.buf);\
-            return X
-
     close (pipe_in_fds[0]); // close "выпись"
     close (pipe_out_fds[1]); // close "впись"
     int pipe_in_in_flags = fcntl (pipe_in_fds[1], F_GETFL); //make pipe_in input O_NONBLOCK
     pipe_in_in_flags |= O_NONBLOCK;
     if (fcntl (pipe_in_fds[1], F_SETFL, pipe_in_in_flags)){
         perror ("can't make pipe_in input O_NONBLOCK");
-           CLOSE_RETURN(-1);
+           goto CLOSE_RETURN;
     }
     //init poll structs
     struct pollfd pollfds[3] = {0};
@@ -111,40 +92,40 @@ int parent_code (int pipe_in_fds[2], int pipe_out_fds[2], int fd)
     size_t totally_read = 0, totally_written = 0, totally_proceeded = 0, totally_saved = 0;
     int bytes_read = 0, bytes_written = 0;
     int buf_sz = pipe_size (pipe_in_fds[1]);
-    char *buf_out = NULL;
-    struct buffer s_buf_in = {0};
-    if (alloc_buffer (&buf_out, buf_sz) == -1 || struct_buffer_init (&s_buf_in, buf_sz) == -1) {
-        CLOSE_RETURN(-1);
+    struct buffer s_buf_out;
+    struct buffer s_buf_in;
+    if (struct_buffer_init (&s_buf_out, buf_sz) == -1 || struct_buffer_init (&s_buf_in, buf_sz) == -1) {
+        goto CLOSE_RETURN;
     }
-    //we sleep while we have nothing to do, on receiving work, redirect data to gzip (or dump gzip output to file) and print statistics, timeount is infinite.
+    //we sleep while we have nothing to do, on receiving work, redirect data to gzip (or dump gzip output to file) and print statistics, timeout is infinite.
     while (!eof_flag) {
         if (poll (pollfds, pollfds_num, -1) == -1) {
             perror ("poll () crashed");
-            CLOSE_FREE_RETURN(-1);
+            goto CLOSE_FREE_RETURN;
         }
 
         switch (pipe_read_pfd->revents) {
             case POLLHUP: // hang up (gzip crashed or ended)
             case POLLRDNORM: // same as pollout
             case POLLIN:
-            case POLLIN | POLLHUP: // crutch... solutuon is switching to if from switch, but it is less understandable
+            case POLLIN | POLLHUP: // crutch... solution is switching to if from switch, but it is less understandable
                 //read & dump to file
                 bytes_read = 0;
                 bytes_written = 0;
-                bytes_read = read (pipe_read_pfd->fd, buf_out, (size_t) buf_sz);
+                bytes_read = buf_read (pipe_read_pfd->fd, &s_buf_out);
                 totally_proceeded += bytes_read;
                 if (!bytes_read) { //in pollin case,  != 0, else gzip already finished, eof.
-                    close (pipe_out_fds[0]);
+                    close (pipe_read_pfd->fd);
                     eof_flag = 1;
                     break;
                 }
-                bytes_written = write (fd, buf_out, (size_t) bytes_read);
+                bytes_written = buf_write (fd, &s_buf_out);
                 totally_saved += bytes_written;
                 break;
             case POLLNVAL:
             case POLLERR:
                 printf ("something went wrong with gzip\n");
-                CLOSE_FREE_RETURN(-1);
+                goto CLOSE_FREE_RETURN;
             default:
                 break;
         }
@@ -156,17 +137,17 @@ int parent_code (int pipe_in_fds[2], int pipe_out_fds[2], int fd)
                 bytes_read = 0;
                 bytes_read = buf_read (stdin_pfd->fd, &s_buf_in);
                 if (bytes_read == -1) {
-                    CLOSE_FREE_RETURN(-1);
+                    goto CLOSE_FREE_RETURN;
                 }                    
                 if (!bytes_read) {
                     stdin_pfd->events = 0; //if no data or buffer space left, don't bother about stdin
-                    if (s_buf_in.data_end - s_buf_in.data_start == 0) { //moreover if bufer is empty, hang up pipe
+                    if (data_amount (&s_buf_in) == 0) { //moreover if buffer is empty, hang up pipe as nothing can be written into it
                         close (pipe_write_pfd->fd);
                         pollfds_num--; //and exclude closed fd from poll list
                     }
                     break;
                 }
-                if (s_buf_in.data_end - s_buf_in.data_start > 0) // if we have somedata, track pipe_write: when we will be able to write into it
+                if (data_amount (&s_buf_in) > 0) // if we have somedata, track pipe_write: when we will be able to write into it
                     pipe_write_pfd->events = POLLOUT;
                 totally_read += bytes_read;
                 break;
@@ -174,7 +155,7 @@ int parent_code (int pipe_in_fds[2], int pipe_out_fds[2], int fd)
             case POLLNVAL: 
             case POLLERR:
                 printf ("something went wrong with STDIN\n");
-                CLOSE_FREE_RETURN(-1);
+                goto CLOSE_FREE_RETURN;
             default:
                 break;
         }
@@ -184,14 +165,14 @@ int parent_code (int pipe_in_fds[2], int pipe_out_fds[2], int fd)
             case POLLOUT:
                 bytes_written = buf_write (pipe_write_pfd->fd, &s_buf_in);
                 if (bytes_written == -1) { //error
-                    CLOSE_FREE_RETURN(-1);
+                    goto CLOSE_FREE_RETURN;
                 }
                 totally_written += bytes_written;
                 if (how_much_read_avail (stdin_pfd->fd)) { // if data is available, bother about reading as we have freed some space
                     stdin_pfd->events = POLLIN;
                     break;
                 }
-                if (s_buf_in.data_end - s_buf_in.data_start == 0) { //if buffer is empty
+                if (data_amount (&s_buf_in) == 0) { //if buffer is empty
                     pipe_write_pfd->events = 0; //then no sense to track pipe_write
                     if (stdin_pfd->events == 0) { //moreover if there is no new data possible
                         close (pipe_write_pfd->fd); //hang up pipe. After that gzip will process left data and hang up pipe_out
@@ -203,7 +184,7 @@ int parent_code (int pipe_in_fds[2], int pipe_out_fds[2], int fd)
             case POLLNVAL: 
             case POLLERR:
                 printf ("something went wrong with pipe write\n");
-                CLOSE_FREE_RETURN(-1);
+                goto CLOSE_FREE_RETURN;
             default:
                 break;
         }
@@ -216,10 +197,23 @@ int parent_code (int pipe_in_fds[2], int pipe_out_fds[2], int fd)
                         time (NULL) - g_start_time, totally_read, totally_written, totally_proceeded, totally_saved,\
                         ((float) totally_saved) / ((float) totally_read));
     }
-    free (buf_out);
+    free (s_buf_out.buf);
     free (s_buf_in.buf);
     close (fd);
     return 0;
+
+    CLOSE_RETURN:
+        close (pipe_in_fds[1]);
+        close (pipe_out_fds[0]);
+        close (fd);
+        return -1;
+    CLOSE_FREE_RETURN:
+        close (pipe_in_fds[1]);
+        close (pipe_out_fds[0]);
+        close (fd);
+        free (s_buf_out.buf);
+        free (s_buf_in.buf);
+        return -1;
 }
 
 int pipe_size (int pipefd) 
